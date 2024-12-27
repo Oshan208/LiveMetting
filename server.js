@@ -1,34 +1,52 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(__dirname + '/public'));
+app.use(express.static(__dirname)); // Serve static files like index.html
 
-io.on('connection', socket => {
-    console.log('User connected:', socket.id);
+const rooms = {}; // Store active room IDs
 
-    socket.on('offer', offer => {
-        socket.broadcast.emit('offer', offer);
-    });
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
 
-    socket.on('answer', answer => {
-        socket.broadcast.emit('answer', answer);
-    });
+  // Handle room creation
+  socket.on("create-room", (roomID) => {
+    if (!rooms[roomID]) {
+      rooms[roomID] = [];
+    }
+    socket.join(roomID);
+    rooms[roomID].push(socket.id);
+    console.log(`Room created: ${roomID}`);
+  });
 
-    socket.on('ice-candidate', candidate => {
-        socket.broadcast.emit('ice-candidate', candidate);
-    });
+  // Handle joining a room
+  socket.on("join-room", (roomID) => {
+    if (rooms[roomID]) {
+      socket.join(roomID);
+      rooms[roomID].push(socket.id);
+      console.log(`User joined room: ${roomID}`);
+      io.to(roomID).emit("room-status", `A new user has joined Room: ${roomID}`);
+    } else {
+      socket.emit("room-status", "Room does not exist.");
+    }
+  });
 
-    socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
-    });
+  // Handle user disconnect
+  socket.on("disconnect", () => {
+    console.log("A user disconnected:", socket.id);
+    for (const roomID in rooms) {
+      rooms[roomID] = rooms[roomID].filter((id) => id !== socket.id);
+      if (rooms[roomID].length === 0) {
+        delete rooms[roomID]; // Clean up empty rooms
+      }
+    }
+  });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+server.listen(3000, () => {
+  console.log("Server is running on http://localhost:3000");
 });
