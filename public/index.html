@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Meeting</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+        }
+        video {
+            width: 45%;
+            margin: 10px;
+        }
+        #controls {
+            margin-top: 20px;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live Meeting Platform</h1>
+    <div>
+        <video id="localVideo" autoplay muted></video>
+        <video id="remoteVideo" autoplay></video>
+    </div>
+    <div id="controls">
+        <button id="startCall">Start Call</button>
+        <button id="toggleMic">Mute Mic</button>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); // Connect to server
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const startCall = document.getElementById('startCall');
+        const toggleMic = document.getElementById('toggleMic');
+
+        let localStream;
+        let peerConnection;
+        let micEnabled = true;
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' } // STUN server
+            ]
+        };
+
+        // Get user media
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                localVideo.srcObject = stream;
+                localStream = stream;
+            })
+            .catch(error => console.error('Error accessing media devices.', error));
+
+        // Create PeerConnection and handle events
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(config);
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', event.candidate);
+                }
+            };
+            peerConnection.ontrack = event => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        }
+
+        // Handle call initiation
+        startCall.addEventListener('click', () => {
+            createPeerConnection();
+            peerConnection.createOffer()
+                .then(offer => peerConnection.setLocalDescription(offer))
+                .then(() => socket.emit('offer', peerConnection.localDescription));
+        });
+
+        // Toggle microphone
+        toggleMic.addEventListener('click', () => {
+            micEnabled = !micEnabled;
+            localStream.getAudioTracks()[0].enabled = micEnabled;
+            toggleMic.textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
+        });
+
+        // Socket events
+        socket.on('offer', offer => {
+            createPeerConnection();
+            peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            peerConnection.createAnswer()
+                .then(answer => peerConnection.setLocalDescription(answer))
+                .then(() => socket.emit('answer', peerConnection.localDescription));
+        });
+
+        socket.on('answer', answer => {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('ice-candidate', candidate => {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+    </script>
+</body>
+</html>
